@@ -1,0 +1,95 @@
+name: sync-private-tags
+run-name: sync private tags
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional private source tag to publish immediately
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: sync-private-tags
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPO: davidzhang12138/CLIProxyAPIPlus
+  MINIMUM_AUTOMATIC_TAG: v7.2.134
+
+jobs:
+  dispatch-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch private source tags
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: main
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Select unpublished tag
+        id: select
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPO: ${{ github.repository }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          tag="${REQUESTED_TAG//[[:space:]]/}"
+          if [[ -n "$tag" ]]; then
+            if [[ ! "$tag" =~ ^v[0-9] ]]; then
+              echo "Invalid tag: $tag" >&2
+              exit 1
+            fi
+            git rev-parse --verify --quiet "refs/tags/${tag}^{commit}" >/dev/null
+          else
+            while IFS= read -r candidate; do
+              [[ -n "$candidate" ]] || continue
+              newest="$(printf '%s\n%s\n' "$MINIMUM_AUTOMATIC_TAG" "$candidate" | sort -V | tail -n 1)"
+              if [[ "$newest" != "$candidate" ]]; then
+                continue
+              fi
+              if ! gh release view "$candidate" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
+                tag="$candidate"
+                break
+              fi
+            done < <(git tag --list 'v*' --sort=-version:refname)
+          fi
+
+          if [[ -z "$tag" ]]; then
+            echo "No unpublished tags found"
+            echo "dispatch=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          source_sha="$(git rev-parse "refs/tags/${tag}^{commit}")"
+          echo "Selected $tag ($source_sha)"
+          echo "dispatch=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          printf 'Selected `%s` (`%s`) for public release.\n' "$tag" "$source_sha" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch public release
+        if: steps.select.outputs.dispatch == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.select.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "tag=$RELEASE_TAG"

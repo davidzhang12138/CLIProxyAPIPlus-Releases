@@ -1,0 +1,147 @@
+name: docker-image
+run-name: docker ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Private source tag to publish as a container image
+        required: true
+        type: string
+
+concurrency:
+  group: docker-image-${{ inputs.tag }}
+  cancel-in-progress: true
+
+env:
+  APP_NAME: CLIProxyAPIPlus
+  SOURCE_REPO: davidzhang12138/CLIProxyAPIPlus
+  RELEASE_TAG: ${{ inputs.tag }}
+  GHCR_REPO: ghcr.io/davidzhang12138/cli-proxy-api-plus
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker_amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Refresh models catalog
+        run: bash .github/scripts/refresh-model-catalogs.sh
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate Build Metadata
+        run: |
+          echo "VERSION=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - name: Build and push (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            COMMIT=${{ env.COMMIT }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          tags: |
+            ${{ env.GHCR_REPO }}:latest-amd64
+            ${{ env.GHCR_REPO }}:${{ env.VERSION }}-amd64
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  docker_arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Refresh models catalog
+        run: bash .github/scripts/refresh-model-catalogs.sh
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate Build Metadata
+        run: |
+          echo "VERSION=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "COMMIT=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - name: Build and push (arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            COMMIT=${{ env.COMMIT }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          tags: |
+            ${{ env.GHCR_REPO }}:latest-arm64
+            ${{ env.GHCR_REPO }}:${{ env.VERSION }}-arm64
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  docker_manifest:
+    runs-on: ubuntu-latest
+    needs:
+      - docker_amd64
+      - docker_arm64
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate Build Metadata
+        run: |
+          echo "VERSION=${RELEASE_TAG}" >> "$GITHUB_ENV"
+      - name: Create and push multi-arch manifests
+        run: |
+          docker buildx imagetools create \
+            --tag "${GHCR_REPO}:latest" \
+            "${GHCR_REPO}:latest-amd64" \
+            "${GHCR_REPO}:latest-arm64"
+          docker buildx imagetools create \
+            --tag "${GHCR_REPO}:${VERSION}" \
+            "${GHCR_REPO}:${VERSION}-amd64" \
+            "${GHCR_REPO}:${VERSION}-arm64"
