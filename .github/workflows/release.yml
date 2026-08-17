@@ -101,6 +101,7 @@ jobs:
             archive_format: zip
     steps:
       - uses: actions/checkout@v6
+        if: matrix.target != 'windows-arm64'
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: refs/tags/${{ env.RELEASE_TAG }}
@@ -108,6 +109,25 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
+      - name: Checkout private source on Windows ARM64
+        if: matrix.target == 'windows-arm64'
+        shell: pwsh
+        env:
+          SOURCE_DEPLOY_KEY: ${{ secrets.SOURCE_DEPLOY_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $keyPath = Join-Path $env:RUNNER_TEMP 'source_deploy_key'
+          $knownHostsPath = Join-Path $env:RUNNER_TEMP 'source_known_hosts'
+          [System.IO.File]::WriteAllText($keyPath, ($env:SOURCE_DEPLOY_KEY -replace "`r", ""))
+          $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+          icacls $keyPath /inheritance:r | Out-Null
+          icacls $keyPath /grant:r "$($currentUser):(R)" | Out-Null
+          ssh-keyscan github.com | Set-Content -Path $knownHostsPath
+          $env:GIT_SSH_COMMAND = "ssh -i `"$keyPath`" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=`"$knownHostsPath`""
+          git init .
+          git remote add origin "git@github.com:$env:SOURCE_REPO.git"
+          git fetch --depth=1 origin "refs/tags/$env:RELEASE_TAG"
+          git checkout --detach FETCH_HEAD
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}

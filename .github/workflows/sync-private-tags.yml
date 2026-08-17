@@ -47,6 +47,46 @@ jobs:
         run: |
           set -euo pipefail
 
+          release_is_complete() {
+            local candidate="$1"
+            local version="${candidate#v}"
+            local assets
+            if ! assets="$(gh release view "$candidate" --repo "$RELEASE_REPO" --json assets --jq '.assets[].name' 2>/dev/null)"; then
+              return 1
+            fi
+            local required=(
+              "checksums.txt"
+              "CLIProxyAPIPlus_${version}_darwin_amd64.tar.gz"
+              "CLIProxyAPIPlus_${version}_darwin_aarch64.tar.gz"
+              "CLIProxyAPIPlus_${version}_windows_amd64.zip"
+              "CLIProxyAPIPlus_${version}_windows_aarch64.zip"
+              "CLIProxyAPIPlus_${version}_linux_amd64.tar.gz"
+              "CLIProxyAPIPlus_${version}_linux_aarch64.tar.gz"
+              "CLIProxyAPIPlus_${version}_linux_amd64_no-plugin.tar.gz"
+              "CLIProxyAPIPlus_${version}_linux_aarch64_no-plugin.tar.gz"
+              "CLIProxyAPIPlus_${version}_freebsd_amd64.tar.gz"
+              "CLIProxyAPIPlus_${version}_freebsd_aarch64_no-plugin.tar.gz"
+            )
+            local asset
+            for asset in "${required[@]}"; do
+              if ! grep -Fqx "$asset" <<< "$assets"; then
+                return 1
+              fi
+            done
+          }
+
+          release_is_active() {
+            local candidate="$1"
+            local active
+            active="$(gh run list \
+              --repo "$RELEASE_REPO" \
+              --workflow release.yml \
+              --limit 20 \
+              --json displayTitle,status,databaseId \
+              --jq ".[] | select(.displayTitle == \"release ${candidate}\" and (.status == \"queued\" or .status == \"in_progress\")) | .databaseId")"
+            [[ -n "$active" ]]
+          }
+
           tag="${REQUESTED_TAG//[[:space:]]/}"
           if [[ -n "$tag" ]]; then
             if [[ ! "$tag" =~ ^v[0-9] ]]; then
@@ -61,10 +101,16 @@ jobs:
               if [[ "$newest" != "$candidate" ]]; then
                 continue
               fi
-              if ! gh release view "$candidate" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
-                tag="$candidate"
-                break
+              if release_is_complete "$candidate"; then
+                continue
               fi
+              if release_is_active "$candidate"; then
+                echo "Release $candidate is already running"
+                echo "dispatch=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              tag="$candidate"
+              break
             done < <(git tag --list 'v*' --sort=-version:refname)
           fi
 
