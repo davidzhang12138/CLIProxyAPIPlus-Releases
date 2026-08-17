@@ -116,9 +116,11 @@ jobs:
           SOURCE_DEPLOY_KEY: ${{ secrets.SOURCE_DEPLOY_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $keyPath = Join-Path $env:RUNNER_TEMP 'source_deploy_key'
           $knownHostsPath = Join-Path $env:RUNNER_TEMP 'source_known_hosts'
-          [System.IO.File]::WriteAllText($keyPath, ($env:SOURCE_DEPLOY_KEY -replace "`r", ""))
+          $privateKey = ($env:SOURCE_DEPLOY_KEY -replace "`r", "").TrimEnd("`n") + "`n"
+          [System.IO.File]::WriteAllText($keyPath, $privateKey, [System.Text.UTF8Encoding]::new($false))
           $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
           icacls $keyPath /inheritance:r | Out-Null
           icacls $keyPath /grant:r "$($currentUser):(R)" | Out-Null
