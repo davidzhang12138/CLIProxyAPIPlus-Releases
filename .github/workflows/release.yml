@@ -124,8 +124,7 @@ jobs:
           $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
           icacls $keyPath /inheritance:r | Out-Null
           icacls $keyPath /grant:r "$($currentUser):(R)" | Out-Null
-          ssh-keyscan github.com | Set-Content -Path $knownHostsPath
-          $env:GIT_SSH_COMMAND = "ssh -i `"$keyPath`" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=`"$knownHostsPath`""
+          $env:GIT_SSH_COMMAND = "ssh -i `"$keyPath`" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=`"$knownHostsPath`""
           git init .
           git remote add origin "git@github.com:$env:SOURCE_REPO.git"
           git fetch --depth=1 origin "refs/tags/$env:RELEASE_TAG"
