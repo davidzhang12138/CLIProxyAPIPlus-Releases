@@ -10,15 +10,14 @@ on:
         type: string
 
 permissions:
-  actions: write
-  contents: write
+  actions: read
+  contents: read
 
 concurrency:
   group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
-  GH_REPO: ${{ github.repository }}
   SOURCE_REPO: davidzhang12138/CLIProxyAPIPlus
   RELEASE_TAG: ${{ inputs.tag }}
   GO_VERSION: '1.26.4'
@@ -35,9 +34,9 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - name: Create release
+      - name: Create release in private source repo
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
         run: |
           set -euo pipefail
           notes_file="$(mktemp)"
@@ -48,7 +47,7 @@ jobs:
             printf '## Build source\n\n'
             printf -- '- Source tag: `%s`\n' "$RELEASE_TAG"
             printf -- '- Source commit: `%s`\n' "$source_commit"
-            printf -- '- Source repository remains private; this repository contains release automation and public artifacts only.\n\n'
+            printf -- '- Built by the public release runner [CLIProxyAPIPlus-Releases](https://github.com/%s); assets are stored in this private source repository.\n\n' "$GITHUB_REPOSITORY"
             cat <<'EOF'
           ## Linux release assets
 
@@ -61,10 +60,10 @@ jobs:
           EOF
           } > "$notes_file"
 
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file "$notes_file"
+          if gh release view "$RELEASE_TAG" --repo "$SOURCE_REPO" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "$SOURCE_REPO" --title "$RELEASE_TAG" --notes-file "$notes_file"
           else
-            gh release create "$RELEASE_TAG" --target main --title "$RELEASE_TAG" --notes-file "$notes_file"
+            gh release create "$RELEASE_TAG" --repo "$SOURCE_REPO" --title "$RELEASE_TAG" --notes-file "$notes_file"
           fi
 
   build-hosted:
@@ -181,7 +180,7 @@ jobs:
       - name: Upload release assets
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -191,17 +190,17 @@ jobs:
             printf '%s\n' "${assets[@]}" >&2
             exit 1
           fi
-          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" "${assets[@]}" --clobber
       - name: Refresh release checksums
         continue-on-error: true
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
         run: |
           set -euo pipefail
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "$tmp_dir"' EXIT
-          gh release download "$RELEASE_TAG" \
+          gh release download "$RELEASE_TAG" --repo "$SOURCE_REPO" \
             --pattern 'CLIProxyAPIPlus_*.tar.gz' \
             --pattern 'CLIProxyAPIPlus_*.zip' \
             --dir "$tmp_dir" \
@@ -220,7 +219,7 @@ jobs:
               shasum -a 256 "${archives[@]}" | sort -k2 > checksums.txt
             fi
           )
-          gh release upload "$RELEASE_TAG" "$tmp_dir/checksums.txt" --clobber
+          gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" "$tmp_dir/checksums.txt" --clobber
 
   build-linux-glibc:
     name: build linux-${{ matrix.goarch }} glibc
@@ -319,7 +318,7 @@ jobs:
       - name: Upload release assets
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -329,17 +328,17 @@ jobs:
             printf '%s\n' "${assets[@]}" >&2
             exit 1
           fi
-          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" "${assets[@]}" --clobber
       - name: Refresh release checksums
         continue-on-error: true
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
         run: |
           set -euo pipefail
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "$tmp_dir"' EXIT
-          gh release download "$RELEASE_TAG" \
+          gh release download "$RELEASE_TAG" --repo "$SOURCE_REPO" \
             --pattern 'CLIProxyAPIPlus_*.tar.gz' \
             --pattern 'CLIProxyAPIPlus_*.zip' \
             --dir "$tmp_dir" \
@@ -358,7 +357,7 @@ jobs:
               shasum -a 256 "${archives[@]}" | sort -k2 > checksums.txt
             fi
           )
-          gh release upload "$RELEASE_TAG" "$tmp_dir/checksums.txt" --clobber
+          gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" "$tmp_dir/checksums.txt" --clobber
 
   build-linux-no-plugin:
     name: build linux-${{ matrix.goarch }} no-plugin
@@ -431,7 +430,7 @@ jobs:
       - name: Upload release assets
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -441,17 +440,17 @@ jobs:
             printf '%s\n' "${assets[@]}" >&2
             exit 1
           fi
-          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" "${assets[@]}" --clobber
       - name: Refresh release checksums
         continue-on-error: true
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
         run: |
           set -euo pipefail
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "$tmp_dir"' EXIT
-          gh release download "$RELEASE_TAG" \
+          gh release download "$RELEASE_TAG" --repo "$SOURCE_REPO" \
             --pattern 'CLIProxyAPIPlus_*.tar.gz' \
             --pattern 'CLIProxyAPIPlus_*.zip' \
             --dir "$tmp_dir" \
@@ -470,7 +469,7 @@ jobs:
               shasum -a 256 "${archives[@]}" | sort -k2 > checksums.txt
             fi
           )
-          gh release upload "$RELEASE_TAG" "$tmp_dir/checksums.txt" --clobber
+          gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" "$tmp_dir/checksums.txt" --clobber
 
   build-freebsd:
     name: build ${{ matrix.target }}
@@ -579,7 +578,7 @@ jobs:
       - name: Upload release assets
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -589,17 +588,17 @@ jobs:
             printf '%s\n' "${assets[@]}" >&2
             exit 1
           fi
-          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" "${assets[@]}" --clobber
       - name: Refresh release checksums
         continue-on-error: true
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
         run: |
           set -euo pipefail
           tmp_dir="$(mktemp -d)"
           trap 'rm -rf "$tmp_dir"' EXIT
-          gh release download "$RELEASE_TAG" \
+          gh release download "$RELEASE_TAG" --repo "$SOURCE_REPO" \
             --pattern 'CLIProxyAPIPlus_*.tar.gz' \
             --pattern 'CLIProxyAPIPlus_*.zip' \
             --dir "$tmp_dir" \
@@ -618,7 +617,7 @@ jobs:
               shasum -a 256 "${archives[@]}" | sort -k2 > checksums.txt
             fi
           )
-          gh release upload "$RELEASE_TAG" "$tmp_dir/checksums.txt" --clobber
+          gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" "$tmp_dir/checksums.txt" --clobber
 
   publish-checksums:
     runs-on: ubuntu-latest
@@ -635,7 +634,7 @@ jobs:
           merge-multiple: true
       - name: Publish final checksums
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
         run: |
           set -euo pipefail
           # prepare-release/build failures leave no artifacts; download-artifact
@@ -652,30 +651,4 @@ jobs:
             exit 0
           fi
           sha256sum "${archives[@]}" | sort -k2 > checksums.txt
-          gh release upload "$RELEASE_TAG" checksums.txt --clobber
-
-  dispatch-docker:
-    runs-on: ubuntu-latest
-    needs:
-      - build-hosted
-      - build-linux-glibc
-      - build-linux-no-plugin
-      - build-freebsd
-      - publish-checksums
-    if: >-
-      ${{ always() &&
-          needs.build-hosted.result == 'success' &&
-          needs.build-linux-glibc.result == 'success' &&
-          needs.build-linux-no-plugin.result == 'success' &&
-          needs.build-freebsd.result == 'success' &&
-          needs.publish-checksums.result == 'success' }}
-    steps:
-      - name: Dispatch container build
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh workflow run docker-image.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f "tag=$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" checksums.txt --clobber

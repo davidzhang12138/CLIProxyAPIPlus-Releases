@@ -37,42 +37,21 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
-      - name: Select unpublished tag
+      - name: Select unpublished tags
         id: select
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
           RELEASE_REPO: ${{ github.repository }}
           REQUESTED_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
 
-          release_is_complete() {
-            local candidate="$1"
-            local version="${candidate#v}"
-            local assets
-            if ! assets="$(gh release view "$candidate" --repo "$RELEASE_REPO" --json assets --jq '.assets[].name' 2>/dev/null)"; then
-              return 1
-            fi
-            local required=(
-              "checksums.txt"
-              "CLIProxyAPIPlus_${version}_darwin_amd64.tar.gz"
-              "CLIProxyAPIPlus_${version}_darwin_aarch64.tar.gz"
-              "CLIProxyAPIPlus_${version}_windows_amd64.zip"
-              "CLIProxyAPIPlus_${version}_windows_aarch64.zip"
-              "CLIProxyAPIPlus_${version}_linux_amd64.tar.gz"
-              "CLIProxyAPIPlus_${version}_linux_aarch64.tar.gz"
-              "CLIProxyAPIPlus_${version}_linux_amd64_no-plugin.tar.gz"
-              "CLIProxyAPIPlus_${version}_linux_aarch64_no-plugin.tar.gz"
-              "CLIProxyAPIPlus_${version}_freebsd_amd64.tar.gz"
-              "CLIProxyAPIPlus_${version}_freebsd_aarch64_no-plugin.tar.gz"
-            )
-            local asset
-            for asset in "${required[@]}"; do
-              if ! grep -Fqx "$asset" <<< "$assets"; then
-                return 1
-              fi
-            done
+          published_tags="$(GH_TOKEN="$SOURCE_TOKEN" gh api --paginate "repos/${SOURCE_REPO}/releases" --jq '.[].tag_name')"
+
+          is_published() {
+            grep -Fxq -- "$1" <<< "$published_tags"
           }
 
           release_is_active() {
@@ -87,13 +66,19 @@ jobs:
             [[ -n "$active" ]]
           }
 
-          tag="${REQUESTED_TAG//[[:space:]]/}"
-          if [[ -n "$tag" ]]; then
-            if [[ ! "$tag" =~ ^v[0-9] ]]; then
-              echo "Invalid tag: $tag" >&2
+          tags=()
+          requested="${REQUESTED_TAG//[[:space:]]/}"
+          if [[ -n "$requested" ]]; then
+            if [[ ! "$requested" =~ ^v[0-9] ]]; then
+              echo "Invalid tag: $requested" >&2
               exit 1
             fi
-            git rev-parse --verify --quiet "refs/tags/${tag}^{commit}" >/dev/null
+            git rev-parse --verify --quiet "refs/tags/${requested}^{commit}" >/dev/null
+            if release_is_active "$requested"; then
+              echo "Release $requested is already running"
+            else
+              tags+=("$requested")
+            fi
           else
             while IFS= read -r candidate; do
               [[ -n "$candidate" ]] || continue
@@ -101,41 +86,42 @@ jobs:
               if [[ "$newest" != "$candidate" ]]; then
                 continue
               fi
-              if release_is_complete "$candidate"; then
+              if is_published "$candidate"; then
                 continue
               fi
               if release_is_active "$candidate"; then
-                echo "Release $candidate is already running"
-                echo "dispatch=false" >> "$GITHUB_OUTPUT"
-                exit 0
+                echo "Release $candidate is already running, skipping"
+                continue
               fi
-              tag="$candidate"
-              break
+              tags+=("$candidate")
             done < <(git tag --list 'v*' --sort=-version:refname)
           fi
 
-          if [[ -z "$tag" ]]; then
+          if [[ ${#tags[@]} -eq 0 ]]; then
             echo "No unpublished tags found"
             echo "dispatch=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          source_sha="$(git rev-parse "refs/tags/${tag}^{commit}")"
-          echo "Selected $tag ($source_sha)"
-          echo "dispatch=true" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
-          printf 'Selected `%s` (`%s`) for public release.\n' "$tag" "$source_sha" >> "$GITHUB_STEP_SUMMARY"
+          echo "Selected: ${tags[*]}"
+          {
+            echo 'dispatch=true'
+            echo "tags=$(printf '%s\n' "${tags[@]}" | jq -R . | jq -c .)"
+          } >> "$GITHUB_OUTPUT"
+          printf 'Selected for public release: `%s`\n' "${tags[*]}" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Dispatch public release
+      - name: Dispatch public releases
         if: steps.select.outputs.dispatch == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.select.outputs.tag }}
+          TAGS: ${{ steps.select.outputs.tags }}
         run: |
           set -euo pipefail
-          gh workflow run release.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f "tag=$RELEASE_TAG"
+          for tag in $(jq -r '.[]' <<< "$TAGS"); do
+            echo "Dispatching release for $tag"
+            gh workflow run release.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main \
+              -f "tag=$tag"
+          done
