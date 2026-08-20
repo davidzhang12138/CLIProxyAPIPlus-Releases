@@ -10,7 +10,7 @@ on:
         type: string
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 concurrency:
@@ -652,3 +652,29 @@ jobs:
           fi
           sha256sum "${archives[@]}" | sort -k2 > checksums.txt
           gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" checksums.txt --clobber
+
+  dispatch-docker:
+    runs-on: ubuntu-latest
+    needs:
+      - build-hosted
+      - build-linux-glibc
+      - build-linux-no-plugin
+      - build-freebsd
+      - publish-checksums
+    if: >-
+      ${{ always() &&
+          needs.build-hosted.result == 'success' &&
+          needs.build-linux-glibc.result == 'success' &&
+          needs.build-linux-no-plugin.result == 'success' &&
+          needs.build-freebsd.result == 'success' &&
+          needs.publish-checksums.result == 'success' }}
+    steps:
+      - name: Dispatch container build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run docker-image.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "tag=$RELEASE_TAG"

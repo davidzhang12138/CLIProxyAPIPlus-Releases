@@ -6,7 +6,7 @@ This public repository hosts the release automation for CLIProxyAPIPlus. It does
 
 - `sync-private-tags` reads version tags from the private source repository every 5 minutes and dispatches a `release` run for every tag that has not been published yet. A specific tag can also be published immediately via manual dispatch.
 - `release` checks out the exact private source tag, builds macOS, Windows, Linux (glibc and no-plugin), and FreeBSD archives, then creates the GitHub Release **in the private source repository** together with all archives and `checksums.txt`.
-- `docker-image` is dispatched manually for a tag, builds `linux/amd64` and `linux/arm64` images, pushes them to `ghcr.io/davidzhang12138/cli-proxy-api-plus`, and records a `<tag>-docker` marker Release in the private source repository.
+- `docker-image` is dispatched automatically after all release builds succeed. It builds `linux/amd64` and `linux/arm64` images, pushes them to `ghcr.io/davidzhang12138/cli-proxy-api-plus`, and records a `<tag>-docker` marker Release in the private source repository. It can also be dispatched manually for recovery.
 
 Private source is only checked out temporarily on trusted GitHub-hosted runners. It is never committed to this repository, and workflows do not use GitHub Actions/Docker build caches, SBOM, or provenance attestations.
 

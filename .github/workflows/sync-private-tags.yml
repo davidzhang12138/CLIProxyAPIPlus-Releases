@@ -106,7 +106,7 @@ jobs:
           echo "Selected: ${tags[*]}"
           {
             echo 'dispatch=true'
-            echo "tags=$(printf '%s\n' "${tags[@]}" | jq -R . | jq -c .)"
+            echo "tags=$(printf '%s\n' "${tags[@]}" | jq -R . | jq -sc .)"
           } >> "$GITHUB_OUTPUT"
           printf 'Selected for public release: `%s`\n' "${tags[*]}" >> "$GITHUB_STEP_SUMMARY"
 
@@ -118,10 +118,11 @@ jobs:
           TAGS: ${{ steps.select.outputs.tags }}
         run: |
           set -euo pipefail
-          for tag in $(jq -r '.[]' <<< "$TAGS"); do
-            echo "Dispatching release for $tag"
-            gh workflow run release.yml \
-              --repo "$GITHUB_REPOSITORY" \
-              --ref main \
-              -f "tag=$tag"
-          done
+          jq -er '.[]' <<< "$TAGS" |
+            while IFS= read -r tag; do
+              echo "Dispatching release for $tag"
+              gh workflow run release.yml \
+                --repo "$GITHUB_REPOSITORY" \
+                --ref main \
+                -f "tag=$tag"
+            done
