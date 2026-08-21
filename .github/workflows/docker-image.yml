@@ -26,8 +26,6 @@ permissions:
 jobs:
   docker_amd64:
     runs-on: ubuntu-latest
-    outputs:
-      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - name: Validate release tag
         run: |
@@ -45,12 +43,9 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
       - name: Record source revision
-        id: source
         run: |
           set -euo pipefail
           source_sha="$(git rev-parse HEAD)"
-          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
-          echo "short_sha=${source_sha:0:12}" >> "$GITHUB_OUTPUT"
           printf 'Source tag: `%s`\n\nSource commit: `%s`\n' "$RELEASE_TAG" "$source_sha" >> "$GITHUB_STEP_SUMMARY"
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -171,34 +166,3 @@ jobs:
             --tag "${GHCR_REPO}:${VERSION}" \
             "${GHCR_REPO}:${VERSION}-amd64" \
             "${GHCR_REPO}:${VERSION}-arm64"
-      - name: Record image marker in private source repo
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.MAIN_REPO_TOKEN }}
-          SOURCE_SHA: ${{ needs.docker_amd64.outputs.source_sha }}
-        run: |
-          set -euo pipefail
-          notes_file="$(mktemp)"
-          trap 'rm -f "$notes_file"' EXIT
-
-          {
-            printf '## Docker image\n\n'
-            printf -- '- Version: `%s`\n' "$RELEASE_TAG"
-            printf -- '- Image: `%s:%s`\n' "$GHCR_REPO" "$RELEASE_TAG"
-            printf -- '- Source commit: `%s`\n' "$SOURCE_SHA"
-            printf -- '- Platforms: `linux/amd64`, `linux/arm64`\n\n'
-            printf 'Image built and published by the public automation repository [CLIProxyAPIPlus-Releases](https://github.com/%s).\n' "$GITHUB_REPOSITORY"
-          } > "$notes_file"
-
-          marker_tag="${RELEASE_TAG}-docker"
-          if gh release view "$marker_tag" --repo "$SOURCE_REPO" >/dev/null 2>&1; then
-            gh release edit "$marker_tag" \
-              --repo "$SOURCE_REPO" \
-              --title "$marker_tag" \
-              --notes-file "$notes_file"
-          else
-            gh release create "$marker_tag" \
-              --repo "$SOURCE_REPO" \
-              --title "$marker_tag" \
-              --notes-file "$notes_file"
-          fi
