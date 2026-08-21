@@ -96,7 +96,7 @@ jobs:
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: refs/tags/${{ env.RELEASE_TAG }}
-          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          token: ${{ secrets.MAIN_REPO_TOKEN }}
           fetch-depth: 1
           persist-credentials: false
       - name: Set up Go
