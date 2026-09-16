@@ -12,6 +12,7 @@ on:
 permissions:
   actions: write
   contents: read
+  packages: write
 
 concurrency:
   group: release-${{ inputs.tag }}
@@ -23,7 +24,15 @@ env:
   GO_VERSION: '1.26.4'
 
 jobs:
+  docker:
+    name: docker image
+    uses: ./.github/workflows/docker-image.yml
+    with:
+      tag: ${{ inputs.tag }}
+    secrets: inherit
+
   prepare-release:
+    needs: docker
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -532,22 +541,35 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y clang lld wget
+          sudo apt-get install -y clang lld curl xz-utils
       - name: Build FreeBSD binary with CGO
         if: ${{ matrix.cgo_enabled }}
         timeout-minutes: 45
-        uses: go-cross/cgo-actions@v1
-        with:
-          dir: .
-          packages: ./cmd/server/
-          targets: ${{ env.TARGET }}
-          out-dir: dist/${{ env.TARGET }}/bin
-          output: cli-proxy-api-plus
-          flags: >-
-            -ldflags=-s -w
-            -X main.Version=${{ steps.metadata.outputs.release_version }}
-            -X main.Commit=${{ steps.metadata.outputs.commit }}
-            -X main.BuildDate=${{ steps.metadata.outputs.build_date }}
+        shell: bash
+        env:
+          FREEBSD_VERSION: '14.5'
+        run: |
+          set -euo pipefail
+
+          sysroot_dir="${RUNNER_TEMP}/freebsd-${TARGET_GOARCH}-sysroot"
+          base_archive="${RUNNER_TEMP}/freebsd-${TARGET_GOARCH}-base.txz"
+          target_triple="x86_64-unknown-freebsd${FREEBSD_VERSION}"
+          mkdir -p "$sysroot_dir" "dist/${TARGET}/bin"
+
+          curl --fail --location --retry 5 --retry-delay 3 --retry-connrefused \
+            "https://download.freebsd.org/releases/${TARGET_GOARCH}/${FREEBSD_VERSION}-RELEASE/base.txz" \
+            --output "$base_archive"
+          tar -xJf "$base_archive" -C "$sysroot_dir"
+
+          CGO_ENABLED=1 \
+          GOOS=freebsd \
+          GOARCH="$TARGET_GOARCH" \
+          CC="clang --target=${target_triple} --sysroot=${sysroot_dir}" \
+          CGO_CFLAGS="--sysroot=${sysroot_dir}" \
+          CGO_LDFLAGS="--sysroot=${sysroot_dir} -fuse-ld=lld" \
+          go build -buildvcs=false \
+            -ldflags="-s -w -X main.Version=${RELEASE_VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE}" \
+            -o "dist/${TARGET}/bin/cli-proxy-api-plus" ./cmd/server/
       - name: Build FreeBSD no-plugin binary
         if: ${{ !matrix.cgo_enabled }}
         shell: bash
@@ -652,29 +674,3 @@ jobs:
           fi
           sha256sum "${archives[@]}" | sort -k2 > checksums.txt
           gh release upload "$RELEASE_TAG" --repo "$SOURCE_REPO" checksums.txt --clobber
-
-  dispatch-docker:
-    runs-on: ubuntu-latest
-    needs:
-      - build-hosted
-      - build-linux-glibc
-      - build-linux-no-plugin
-      - build-freebsd
-      - publish-checksums
-    if: >-
-      ${{ always() &&
-          needs.build-hosted.result == 'success' &&
-          needs.build-linux-glibc.result == 'success' &&
-          needs.build-linux-no-plugin.result == 'success' &&
-          needs.build-freebsd.result == 'success' &&
-          needs.publish-checksums.result == 'success' }}
-    steps:
-      - name: Dispatch container build
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh workflow run docker-image.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f "tag=$RELEASE_TAG"
