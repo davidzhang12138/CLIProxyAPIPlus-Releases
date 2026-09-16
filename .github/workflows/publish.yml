@@ -1,0 +1,113 @@
+name: publish
+run-name: publish ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Private source tag to publish (Docker first, then Release)
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Docker workflow
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
+          gh workflow run docker-image.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "tag=$RELEASE_TAG"
+
+      - name: Wait for Docker workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STARTED_AT: ${{ steps.dispatch.outputs.started_at }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker_run_id=""
+          for _ in $(seq 1 60); do
+            docker_run_id="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow docker-image.yml \
+              --limit 20 \
+              --json databaseId,displayTitle,createdAt \
+              --jq '.[] | select(.displayTitle == ("docker " + env.RELEASE_TAG) and .createdAt >= env.STARTED_AT) | .databaseId' \
+              | head -n 1)"
+            if [[ -n "$docker_run_id" ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ -z "$docker_run_id" ]]; then
+            echo "Timed out waiting for Docker workflow run" >&2
+            exit 1
+          fi
+          echo "Watching Docker workflow run $docker_run_id"
+          gh run watch "$docker_run_id" --repo "$GITHUB_REPOSITORY" --interval 20 --exit-status
+
+  release:
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Release workflow
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "tag=$RELEASE_TAG"
+
+      - name: Wait for Release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STARTED_AT: ${{ steps.dispatch.outputs.started_at }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_run_id=""
+          for _ in $(seq 1 60); do
+            release_run_id="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow release.yml \
+              --limit 20 \
+              --json databaseId,displayTitle,createdAt \
+              --jq '.[] | select(.displayTitle == ("release " + env.RELEASE_TAG) and .createdAt >= env.STARTED_AT) | .databaseId' \
+              | head -n 1)"
+            if [[ -n "$release_run_id" ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ -z "$release_run_id" ]]; then
+            echo "Timed out waiting for Release workflow run" >&2
+            exit 1
+          fi
+          echo "Watching Release workflow run $release_run_id"
+          gh run watch "$release_run_id" --repo "$GITHUB_REPOSITORY" --interval 20 --exit-status

@@ -8,12 +8,6 @@ on:
         description: Private source tag to publish as a container image
         required: true
         type: string
-  workflow_call:
-    inputs:
-      tag:
-        description: Private source tag to publish as a container image
-        required: true
-        type: string
 
 concurrency:
   group: docker-image-${{ inputs.tag }}

@@ -59,10 +59,9 @@ jobs:
             local active
             active="$(gh run list \
               --repo "$RELEASE_REPO" \
-              --workflow release.yml \
-              --limit 20 \
+              --limit 50 \
               --json displayTitle,status,databaseId \
-              --jq ".[] | select(.displayTitle == \"release ${candidate}\" and (.status == \"queued\" or .status == \"in_progress\")) | .databaseId")"
+              --jq ".[] | select((.displayTitle == \"publish ${candidate}\" or .displayTitle == \"release ${candidate}\") and (.status == \"queued\" or .status == \"in_progress\")) | .databaseId")"
             [[ -n "$active" ]]
           }
 
@@ -121,7 +120,7 @@ jobs:
           jq -er '.[]' <<< "$TAGS" |
             while IFS= read -r tag; do
               echo "Dispatching release for $tag"
-              gh workflow run release.yml \
+              gh workflow run publish.yml \
                 --repo "$GITHUB_REPOSITORY" \
                 --ref main \
                 -f "tag=$tag"

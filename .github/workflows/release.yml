@@ -12,7 +12,6 @@ on:
 permissions:
   actions: write
   contents: read
-  packages: write
 
 concurrency:
   group: release-${{ inputs.tag }}
@@ -24,15 +23,7 @@ env:
   GO_VERSION: '1.26.4'
 
 jobs:
-  docker:
-    name: docker image
-    uses: ./.github/workflows/docker-image.yml
-    with:
-      tag: ${{ inputs.tag }}
-    secrets: inherit
-
   prepare-release:
-    needs: docker
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
