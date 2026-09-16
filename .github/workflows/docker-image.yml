@@ -20,6 +20,7 @@ env:
   GHCR_REPO: ghcr.io/davidzhang12138/cli-proxy-api-plus
 
 permissions:
+  actions: write
   contents: read
   packages: write
 
@@ -166,3 +167,18 @@ jobs:
             --tag "${GHCR_REPO}:${VERSION}" \
             "${GHCR_REPO}:${VERSION}-amd64" \
             "${GHCR_REPO}:${VERSION}-arm64"
+
+  dispatch-release:
+    runs-on: ubuntu-latest
+    needs: docker_manifest
+    steps:
+      - name: Dispatch Release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f "tag=$RELEASE_TAG"
