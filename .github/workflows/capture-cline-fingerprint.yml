@@ -1,0 +1,149 @@
+name: Capture Cline (Node) Fingerprint
+
+on:
+  workflow_dispatch:
+
+jobs:
+  capture:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Write capture server (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $script = @'
+          import socket, json
+          def parse_hello(rec):
+              if len(rec)<5 or rec[0]!=0x16: return None
+              p=rec[5:]
+              if p[0]!=0x01: return None
+              hs=int.from_bytes(p[1:4],"big"); p=p[4:4+hs]
+              pos=2+32; sl=p[pos]; pos+=1+sl
+              csl=int.from_bytes(p[pos:pos+2],"big"); pos+=2
+              cs=["0x%04x"%int.from_bytes(p[pos+i:pos+i+2],"big") for i in range(0,csl,2)]; pos+=csl
+              cl=p[pos]; pos+=1+cl
+              el=int.from_bytes(p[pos:pos+2],"big"); pos+=2; end=pos+el
+              exts=[];groups=[];sigs=[];vers=[];alpn=[];ks=[]
+              while pos+4<=end:
+                  et=int.from_bytes(p[pos:pos+2],"big"); dl=int.from_bytes(p[pos+2:pos+4],"big"); d=p[pos+4:pos+4+dl]
+                  exts.append("0x%04x"%et)
+                  if et==0x0a: groups=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(2,dl-1,2)]
+                  if et==0x0d: sigs=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(2,dl-1,2)]
+                  if et==0x2b: vers=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(1,dl-1,2)]
+                  if et==0x10:
+                      i=2
+                      while i<dl:
+                          l=d[i]; alpn.append(d[i+1:i+1+l].decode()); i+=1+l
+                  if et==0x33:
+                      i=2
+                      while i+4<=dl:
+                          ks.append("0x%04x"%int.from_bytes(d[i:i+2],"big")); kl=int.from_bytes(d[i+2:i+4],"big"); i+=4+kl
+                  pos+=4+dl
+              return {"cipher_suites":cs,"extensions":exts,"supported_groups":groups,"signature_algorithms":sigs,"supported_versions":vers,"alpn":alpn,"key_shares":ks}
+          srv=socket.socket(); srv.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+          srv.bind(("127.0.0.1",18443)); srv.listen(2); print("listening",flush=True)
+          for i in range(2):
+              conn,_=srv.accept(); data=conn.recv(65535)
+              hello=parse_hello(data)
+              if hello:
+                  fn="capture_%d.json"%i
+                  json.dump(hello,open(fn,"w"),indent=2); print("CAPTURED",fn,flush=True)
+              conn.close()
+          '@
+          Set-Content -Path capture.py -Value $script -Encoding utf8
+
+      - name: Write capture server (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cat > capture.py <<'PYEOF'
+          import socket, json
+          def parse_hello(rec):
+              if len(rec)<5 or rec[0]!=0x16: return None
+              p=rec[5:]
+              if p[0]!=0x01: return None
+              hs=int.from_bytes(p[1:4],"big"); p=p[4:4+hs]
+              pos=2+32; sl=p[pos]; pos+=1+sl
+              csl=int.from_bytes(p[pos:pos+2],"big"); pos+=2
+              cs=["0x%04x"%int.from_bytes(p[pos+i:pos+i+2],"big") for i in range(0,csl,2)]; pos+=csl
+              cl=p[pos]; pos+=1+cl
+              el=int.from_bytes(p[pos:pos+2],"big"); pos+=2; end=pos+el
+              exts=[];groups=[];sigs=[];vers=[];alpn=[];ks=[]
+              while pos+4<=end:
+                  et=int.from_bytes(p[pos:pos+2],"big"); dl=int.from_bytes(p[pos+2:pos+4],"big"); d=p[pos+4:pos+4+dl]
+                  exts.append("0x%04x"%et)
+                  if et==0x0a: groups=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(2,dl-1,2)]
+                  if et==0x0d: sigs=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(2,dl-1,2)]
+                  if et==0x2b: vers=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(1,dl-1,2)]
+                  if et==0x10:
+                      i=2
+                      while i<dl:
+                          l=d[i]; alpn.append(d[i+1:i+1+l].decode()); i+=1+l
+                  if et==0x33:
+                      i=2
+                      while i+4<=dl:
+                          ks.append("0x%04x"%int.from_bytes(d[i:i+2],"big")); kl=int.from_bytes(d[i+2:i+4],"big"); i+=4+kl
+                  pos+=4+dl
+              return {"cipher_suites":cs,"extensions":exts,"supported_groups":groups,"signature_algorithms":sigs,"supported_versions":vers,"alpn":alpn,"key_shares":ks}
+          srv=socket.socket(); srv.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+          srv.bind(("127.0.0.1",18443)); srv.listen(2); print("listening",flush=True)
+          for i in range(2):
+              conn,_=srv.accept(); data=conn.recv(65535)
+              hello=parse_hello(data)
+              if hello:
+                  fn="capture_%d.json"%i
+                  json.dump(hello,open(fn,"w"),indent=2); print("CAPTURED",fn,flush=True)
+              conn.close()
+          PYEOF
+
+      - name: Capture Node https + undici (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          node --version
+          Start-Process python -ArgumentList "capture.py" -RedirectStandardOutput cap.log -RedirectStandardError caperr.log
+          Start-Sleep -Seconds 3
+          # Node https (axios stack)
+          node -e "const https=require('https');const r=https.request({host:'127.0.0.1',port:18443,rejectUnauthorized:false},()=>process.exit(0));r.on('error',()=>process.exit(0));r.end();"
+          Start-Sleep -Seconds 1
+          # undici fetch
+          node -e "fetch('https://127.0.0.1:18443/').catch(()=>{}).finally(()=>process.exit(0));" 2>$null
+          Start-Sleep -Seconds 2
+          Get-Content cap.log -ErrorAction SilentlyContinue
+
+      - name: Capture Node https + undici (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          node --version
+          python3 capture.py > cap.log 2>&1 &
+          sleep 3
+          node -e "const https=require('https');const r=https.request({host:'127.0.0.1',port:18443,rejectUnauthorized:false},()=>process.exit(0));r.on('error',()=>process.exit(0));r.end();"
+          sleep 1
+          node -e "fetch('https://127.0.0.1:18443/').catch(()=>{}).finally(()=>process.exit(0));" 2>/dev/null || true
+          sleep 2
+          cat cap.log
+
+      - name: Show + upload (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          for f in capture_0.json capture_1.json; do echo "=== $f ==="; [ -f $f ] && cat $f || echo MISSING; done
+
+      - name: Show + upload (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($f in @("capture_0.json","capture_1.json")) { Write-Host "=== $f ==="; if (Test-Path $f) { Get-Content $f } else { Write-Host "MISSING" } }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cline-fingerprint-${{ runner.os }}
+          path: |
+            capture_0.json
+            capture_1.json
+          if-no-files-found: warn
