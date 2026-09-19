@@ -164,11 +164,11 @@ jobs:
           sleep 2
           cat cap.log
 
-      - name: Show fingerprint
-        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+      - name: Show fingerprint (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
           if [ -f capture.json ]; then cat capture.json; else echo NO_CAPTURE; fi
-        if: runner.os != 'Windows'
 
       - name: Show fingerprint (Windows)
         if: runner.os == 'Windows'
