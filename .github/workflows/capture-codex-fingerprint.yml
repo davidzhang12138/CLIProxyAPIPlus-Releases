@@ -103,7 +103,10 @@ jobs:
           Start-Process python -ArgumentList "capture.py" -RedirectStandardOutput cap.log -RedirectStandardError caperr.log
           Start-Sleep -Seconds 3
           $env:OPENAI_API_KEY="sk-test"
-          codex exec --skip-git-repo-check -c 'model_provider="lc"' -c 'model_providers.lc={name="lc",base_url="https://127.0.0.1:18443/x",wire_api="responses"}' -m gpt-5.1 "hi" 2>&1 | Out-Null
+          $job = Start-Job { codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -c 'model_provider="lc"' -c 'model_providers.lc={name="lc",base_url="https://127.0.0.1:18443/x",wire_api="responses"}' -m gpt-5.1 "hi" 2>&1 | Out-Null }
+          Wait-Job $job -Timeout 60 | Out-Null
+          Stop-Job $job -ErrorAction SilentlyContinue
+          Remove-Job $job -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 2
           Get-Content cap.log -ErrorAction SilentlyContinue
 
@@ -114,6 +117,7 @@ jobs:
           python3 capture.py > cap.log 2>&1 &
           sleep 3
           OPENAI_API_KEY=sk-test timeout 60 codex exec --skip-git-repo-check \
+            --dangerously-bypass-approvals-and-sandbox \
             -c 'model_provider="lc"' \
             -c 'model_providers.lc={name="lc",base_url="https://127.0.0.1:18443/x",wire_api="responses"}' \
             -m gpt-5.1 "hi" >/dev/null 2>&1 || true
