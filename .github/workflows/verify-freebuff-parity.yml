@@ -325,8 +325,7 @@ jobs:
               m=real.get(k)==proj.get(k); ok=ok and m
               print(("PASS" if m else "FAIL"), k)
               if not m: print("  real:",real.get(k)); print("  proj:",proj.get(k))
-          # padding (0x0015) is length-dependent; drop it before comparing order
-          real_exts=[e for e in real.get("extensions",[]) if e!="0x0015"]
+          real_exts=real.get("extensions",[])
           proj_exts=proj.get("extensions",[])
           m=real_exts==proj_exts; ok=ok and m
           print(("PASS" if m else "FAIL"), "extensions")
