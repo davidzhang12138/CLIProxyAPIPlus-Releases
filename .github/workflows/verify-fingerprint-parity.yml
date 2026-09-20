@@ -108,7 +108,7 @@ jobs:
           PYEOF
 
       - name: Capture real codex CLI fingerprint
-        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+        shell: bash
         run: |
           npm install -g @openai/codex@0.155.1 2>/dev/null
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -127,7 +127,7 @@ jobs:
           echo "=== real codex ==="; cat real_codex.json 2>/dev/null || echo NO_CAPTURE
 
       - name: Build project probe
-        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+        shell: bash
         run: |
           mkdir -p /tmp/probe
           cat > /tmp/probe/main.go <<'EOF'
@@ -150,7 +150,7 @@ jobs:
           ls -la probe 2>/dev/null || echo BUILD_FAIL
 
       - name: Capture project fingerprint
-        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+        shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             python capture.py proj_codex.json 18444 > cap2.log 2>&1 &
