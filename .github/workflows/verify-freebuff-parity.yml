@@ -255,7 +255,11 @@ jobs:
           /tmp/fbparity -mode capture -listen 127.0.0.1:18450 -out out > ccap.log 2>&1 &
           sleep 2
           CODEBUFF_API_KEY=sk-test HTTPS_PROXY=http://127.0.0.1:18450 HTTP_PROXY=http://127.0.0.1:18450 \
-            timeout 40 ./fb/freebuff --cwd . > fb_run.log 2>&1 || true
+            ./fb/freebuff --cwd . > fb_run.log 2>&1 &
+          FB_PID=$!
+          sleep 25
+          kill $FB_PID 2>/dev/null || true
+          wait $FB_PID 2>/dev/null || true
           sleep 3
           pkill -f fbparity || true
           echo "=== capture log ==="; cat ccap.log
