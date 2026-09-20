@@ -123,32 +123,38 @@ jobs:
       - name: Build project probe
         shell: bash
         run: |
-          mkdir -p /tmp/probe
-          cat > /tmp/probe/main.go <<'EOF'
+          mkdir -p $GITHUB_WORKSPACE/cmd/parity_probe
+          cat > $GITHUB_WORKSPACE/cmd/parity_probe/main.go <<'EOF'
           package main
+
           import (
             "fmt"
             "net/http"
             "os"
+
             "github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
           )
+
           func main() {
             req, _ := http.NewRequest(http.MethodGet, "https://chatgpt.com/", nil)
             resp, err := helps.CodexRoundTripToAddr(req, os.Args[1])
-            if err != nil { fmt.Println("err:", err); os.Exit(1) }
+            if err != nil {
+              fmt.Println("err:", err)
+              os.Exit(1)
+            }
             defer resp.Body.Close()
             fmt.Println("status:", resp.StatusCode)
           }
           EOF
-          cd /tmp/probe && go mod init probe 2>/dev/null; go mod edit -replace github.com/router-for-me/CLIProxyAPI/v7=$GITHUB_WORKSPACE && go mod tidy 2>/dev/null; go build -o probe . 2>&1 | head -5
-          ls -la probe 2>/dev/null || echo BUILD_FAIL
+          cd $GITHUB_WORKSPACE && go build -o /tmp/parity_probe ./cmd/parity_probe 2>&1 | head -5
+          ls -la /tmp/parity_probe 2>/dev/null || echo BUILD_FAIL
 
       - name: Capture project fingerprint
         shell: bash
         run: |
           python3 capture.py proj_codex.json 18444 > cap2.log 2>&1 &
           sleep 3
-          /tmp/probe/probe 127.0.0.1:18444 2>&1 | head -2 || true
+          /tmp/parity_probe 127.0.0.1:18444 2>&1 | head -2 || true
           sleep 2
           echo "=== project ==="; cat proj_codex.json 2>/dev/null || echo NO_CAPTURE
 
