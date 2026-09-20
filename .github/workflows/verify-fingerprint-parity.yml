@@ -1,0 +1,195 @@
+name: Verify Fingerprint Parity
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+        with:
+          repository: davidzhang12138/CLIProxyAPIPlus
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Write capture server (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $script = @'
+          import socket, json
+          def parse_hello(rec):
+              if len(rec)<5 or rec[0]!=0x16: return None
+              p=rec[5:]
+              if p[0]!=0x01: return None
+              hs=int.from_bytes(p[1:4],"big"); p=p[4:4+hs]
+              pos=2+32; sl=p[pos]; pos+=1+sl
+              csl=int.from_bytes(p[pos:pos+2],"big"); pos+=2
+              cs=["0x%04x"%int.from_bytes(p[pos+i:pos+i+2],"big") for i in range(0,csl,2)]; pos+=csl
+              cl=p[pos]; pos+=1+cl
+              el=int.from_bytes(p[pos:pos+2],"big"); pos+=2; end=pos+el
+              exts=[];groups=[];sigs=[];vers=[];alpn=[];ks=[]
+              while pos+4<=end:
+                  et=int.from_bytes(p[pos:pos+2],"big"); dl=int.from_bytes(p[pos+2:pos+4],"big"); d=p[pos+4:pos+4+dl]
+                  exts.append("0x%04x"%et)
+                  if et==0x0a: groups=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(2,dl-1,2)]
+                  if et==0x0d: sigs=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(2,dl-1,2)]
+                  if et==0x2b: vers=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(1,dl-1,2)]
+                  if et==0x10:
+                      i=2
+                      while i<dl:
+                          l=d[i]; alpn.append(d[i+1:i+1+l].decode()); i+=1+l
+                  if et==0x33:
+                      i=2
+                      while i+4<=dl:
+                          ks.append("0x%04x"%int.from_bytes(d[i:i+2],"big")); kl=int.from_bytes(d[i+2:i+4],"big"); i+=4+kl
+                  pos+=4+dl
+              return {"cipher_suites":cs,"extensions":exts,"supported_groups":groups,"signature_algorithms":sigs,"supported_versions":vers,"alpn":alpn,"key_shares":ks}
+          import sys
+          out=sys.argv[1]; port=int(sys.argv[2])
+          srv=socket.socket(); srv.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+          srv.bind(("127.0.0.1",port)); srv.listen(1); print("listening",flush=True)
+          conn,_=srv.accept(); data=conn.recv(65535)
+          hello=parse_hello(data)
+          if hello:
+              json.dump(hello,open(out,"w"),indent=2); print("CAPTURED",out,flush=True)
+          '@
+          Set-Content -Path capture.py -Value $script -Encoding utf8
+
+      - name: Write capture server (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cat > capture.py <<'PYEOF'
+          import socket, json, sys
+          def parse_hello(rec):
+              if len(rec)<5 or rec[0]!=0x16: return None
+              p=rec[5:]
+              if p[0]!=0x01: return None
+              hs=int.from_bytes(p[1:4],"big"); p=p[4:4+hs]
+              pos=2+32; sl=p[pos]; pos+=1+sl
+              csl=int.from_bytes(p[pos:pos+2],"big"); pos+=2
+              cs=["0x%04x"%int.from_bytes(p[pos+i:pos+i+2],"big") for i in range(0,csl,2)]; pos+=csl
+              cl=p[pos]; pos+=1+cl
+              el=int.from_bytes(p[pos:pos+2],"big"); pos+=2; end=pos+el
+              exts=[];groups=[];sigs=[];vers=[];alpn=[];ks=[]
+              while pos+4<=end:
+                  et=int.from_bytes(p[pos:pos+2],"big"); dl=int.from_bytes(p[pos+2:pos+4],"big"); d=p[pos+4:pos+4+dl]
+                  exts.append("0x%04x"%et)
+                  if et==0x0a: groups=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(2,dl-1,2)]
+                  if et==0x0d: sigs=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(2,dl-1,2)]
+                  if et==0x2b: vers=["0x%04x"%int.from_bytes(d[i:i+2],"big") for i in range(1,dl-1,2)]
+                  if et==0x10:
+                      i=2
+                      while i<dl:
+                          l=d[i]; alpn.append(d[i+1:i+1+l].decode()); i+=1+l
+                  if et==0x33:
+                      i=2
+                      while i+4<=dl:
+                          ks.append("0x%04x"%int.from_bytes(d[i:i+2],"big")); kl=int.from_bytes(d[i+2:i+4],"big"); i+=4+kl
+                  pos+=4+dl
+              return {"cipher_suites":cs,"extensions":exts,"supported_groups":groups,"signature_algorithms":sigs,"supported_versions":vers,"alpn":alpn,"key_shares":ks}
+          out=sys.argv[1]; port=int(sys.argv[2])
+          srv=socket.socket(); srv.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+          srv.bind(("127.0.0.1",port)); srv.listen(1); print("listening",flush=True)
+          conn,_=srv.accept(); data=conn.recv(65535)
+          hello=parse_hello(data)
+          if hello:
+              json.dump(hello,open(out,"w"),indent=2); print("CAPTURED",out,flush=True)
+          PYEOF
+
+      - name: Capture real codex CLI fingerprint
+        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+        run: |
+          npm install -g @openai/codex@0.155.1 2>/dev/null
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python capture.py real_codex.json 18443 > cap.log 2>&1 &
+            sleep 3
+            $env:OPENAI_API_KEY="sk-test"
+            codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -c 'model_provider="lc"' -c 'model_providers.lc={name="lc",base_url="https://127.0.0.1:18443/x",wire_api="responses"}' -m gpt-5.1 "hi" 2>&1 | Out-Null
+          else
+            python3 capture.py real_codex.json 18443 > cap.log 2>&1 &
+            sleep 3
+            OPENAI_API_KEY=sk-test timeout 60 codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
+              -c 'model_provider="lc"' -c 'model_providers.lc={name="lc",base_url="https://127.0.0.1:18443/x",wire_api="responses"}' \
+              -m gpt-5.1 "hi" >/dev/null 2>&1 || true
+          fi
+          sleep 2
+          echo "=== real codex ==="; cat real_codex.json 2>/dev/null || echo NO_CAPTURE
+
+      - name: Build project probe
+        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+        run: |
+          mkdir -p /tmp/probe
+          cat > /tmp/probe/main.go <<'EOF'
+          package main
+          import (
+            "fmt"
+            "net/http"
+            "os"
+            "github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
+          )
+          func main() {
+            req, _ := http.NewRequest(http.MethodGet, "https://chatgpt.com/", nil)
+            resp, err := helps.CodexRoundTripToAddr(req, os.Args[1])
+            if err != nil { fmt.Println("err:", err); os.Exit(1) }
+            defer resp.Body.Close()
+            fmt.Println("status:", resp.StatusCode)
+          }
+          EOF
+          cd /tmp/probe && go mod init probe 2>/dev/null; go mod edit -replace github.com/router-for-me/CLIProxyAPI/v7=$GITHUB_WORKSPACE && go mod tidy 2>/dev/null; go build -o probe . 2>&1 | head -5
+          ls -la probe 2>/dev/null || echo BUILD_FAIL
+
+      - name: Capture project fingerprint
+        shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            python capture.py proj_codex.json 18444 > cap2.log 2>&1 &
+            sleep 3
+            /tmp/probe/probe.exe 127.0.0.1:18444 2>&1 | Out-Null
+          else
+            python3 capture.py proj_codex.json 18444 > cap2.log 2>&1 &
+            sleep 3
+            /tmp/probe/probe 127.0.0.1:18444 2>&1 | head -2
+          fi
+          sleep 2
+          echo "=== project ==="; cat proj_codex.json 2>/dev/null || echo NO_CAPTURE
+
+      - name: Compare fingerprints
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          def L(f):
+              try: return json.load(open(f))
+              except: return None
+          real = L('real_codex.json')
+          proj = L('proj_codex.json')
+          if not real or not proj:
+              print("SKIP: missing capture"); sys.exit(0)
+          keys = ["cipher_suites","extensions","supported_groups","signature_algorithms","supported_versions","alpn","key_shares"]
+          ok = True
+          for k in keys:
+              m = real.get(k) == proj.get(k)
+              ok = ok and m
+              print(("✅" if m else "❌"), k)
+          print("PARITY:", "MATCH" if ok else "MISMATCH")
+          EOF
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-${{ runner.os }}
+          path: |
+            real_codex.json
+            proj_codex.json
+          if-no-files-found: warn
