@@ -111,18 +111,12 @@ jobs:
         shell: bash
         run: |
           npm install -g @openai/codex@0.155.1 2>/dev/null
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            python capture.py real_codex.json 18443 > cap.log 2>&1 &
-            sleep 3
-            $env:OPENAI_API_KEY="sk-test"
-            codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox -c 'model_provider="lc"' -c 'model_providers.lc={name="lc",base_url="https://127.0.0.1:18443/x",wire_api="responses"}' -m gpt-5.1 "hi" 2>&1 | Out-Null
-          else
-            python3 capture.py real_codex.json 18443 > cap.log 2>&1 &
-            sleep 3
-            OPENAI_API_KEY=sk-test timeout 60 codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
-              -c 'model_provider="lc"' -c 'model_providers.lc={name="lc",base_url="https://127.0.0.1:18443/x",wire_api="responses"}' \
-              -m gpt-5.1 "hi" >/dev/null 2>&1 || true
-          fi
+          python3 capture.py real_codex.json 18443 > cap.log 2>&1 &
+          sleep 3
+          export OPENAI_API_KEY="sk-test"
+          timeout 60 codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
+            -c 'model_provider="lc"' -c 'model_providers.lc={name="lc",base_url="https://127.0.0.1:18443/x",wire_api="responses"}' \
+            -m gpt-5.1 "hi" >/dev/null 2>&1 || true
           sleep 2
           echo "=== real codex ==="; cat real_codex.json 2>/dev/null || echo NO_CAPTURE
 
@@ -152,15 +146,9 @@ jobs:
       - name: Capture project fingerprint
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            python capture.py proj_codex.json 18444 > cap2.log 2>&1 &
-            sleep 3
-            /tmp/probe/probe.exe 127.0.0.1:18444 2>&1 | Out-Null
-          else
-            python3 capture.py proj_codex.json 18444 > cap2.log 2>&1 &
-            sleep 3
-            /tmp/probe/probe 127.0.0.1:18444 2>&1 | head -2
-          fi
+          python3 capture.py proj_codex.json 18444 > cap2.log 2>&1 &
+          sleep 3
+          /tmp/probe/probe 127.0.0.1:18444 2>&1 | head -2 || true
           sleep 2
           echo "=== project ==="; cat proj_codex.json 2>/dev/null || echo NO_CAPTURE
 
