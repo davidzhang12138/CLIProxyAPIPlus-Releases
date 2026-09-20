@@ -146,7 +146,7 @@ jobs:
             fmt.Println("status:", resp.StatusCode)
           }
           EOF
-          cd $GITHUB_WORKSPACE && go build -o /tmp/parity_probe ./cmd/parity_probe 2>&1 | head -5
+          cd $GITHUB_WORKSPACE && go build -o /tmp/parity_probe ./cmd/parity_probe
           ls -la /tmp/parity_probe 2>/dev/null || echo BUILD_FAIL
 
       - name: Capture project fingerprint
@@ -154,7 +154,7 @@ jobs:
         run: |
           python3 capture.py proj_codex.json 18444 > cap2.log 2>&1 &
           sleep 3
-          /tmp/parity_probe 127.0.0.1:18444 2>&1 | head -2 || true
+          /tmp/parity_probe 127.0.0.1:18444 2>&1 || true
           sleep 2
           echo "=== project ==="; cat proj_codex.json 2>/dev/null || echo NO_CAPTURE
 
@@ -162,21 +162,43 @@ jobs:
         shell: bash
         run: |
           python3 - <<'EOF'
-          import json, sys
+          import json, sys, os
+          # On macOS the real codex CLI cannot reach the local capture server
+          # (seatbelt). Fall back to the verified baseline captured locally.
+          MACOS_BASELINE = {
+            "cipher_suites": ["0x00ff","0xc02c","0xc02b","0xc024","0xc023","0xc00a","0xc009","0xc008","0xc030","0xc02f","0xc028","0xc027","0xc014","0xc013","0xc012","0x009d","0x009c","0x003d","0x003c","0x0035","0x002f","0x000a"],
+            "extensions": ["0x0000","0x000a","0x000b","0x000d","0x0005","0x0012","0x0017"],
+            "supported_groups": ["0x0017","0x0018","0x0019"],
+            "signature_algorithms": ["0x0401","0x0201","0x0501","0x0601","0x0403","0x0203","0x0503","0x0603"],
+            "supported_versions": ["0x0303","0x0302","0x0301"],
+            "alpn": [], "key_shares": []
+          }
           def L(f):
               try: return json.load(open(f))
               except: return None
           real = L('real_codex.json')
           proj = L('proj_codex.json')
-          if not real or not proj:
-              print("SKIP: missing capture"); sys.exit(0)
+          runner_os = os.environ.get('RUNNER_OS','')
+          if not proj:
+              print("FAIL: project fingerprint not captured"); sys.exit(1)
+          if not real:
+              if runner_os == 'macOS':
+                  print("real codex not captured (seatbelt); using verified macOS baseline")
+                  real = MACOS_BASELINE
+              else:
+                  print("FAIL: real codex fingerprint not captured"); sys.exit(1)
           keys = ["cipher_suites","extensions","supported_groups","signature_algorithms","supported_versions","alpn","key_shares"]
           ok = True
           for k in keys:
-              m = real.get(k) == proj.get(k)
+              rv, pv = real.get(k), proj.get(k)
+              m = rv == pv
               ok = ok and m
-              print(("✅" if m else "❌"), k)
+              print(("PASS" if m else "FAIL"), k)
+              if not m:
+                  print("  real:", rv)
+                  print("  proj:", pv)
           print("PARITY:", "MATCH" if ok else "MISMATCH")
+          sys.exit(0 if ok else 1)
           EOF
 
       - name: Upload artifacts
