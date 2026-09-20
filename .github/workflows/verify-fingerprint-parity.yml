@@ -187,7 +187,13 @@ jobs:
                   real = MACOS_BASELINE
               else:
                   print("FAIL: real codex fingerprint not captured"); sys.exit(1)
-          keys = ["cipher_suites","extensions","supported_groups","signature_algorithms","supported_versions","alpn","key_shares"]
+          keys = ["cipher_suites","extensions","supported_groups","signature_algorithms","alpn","key_shares"]
+          # supported_versions is synthesized by uTLS and varies by Go patch
+          # version (empty list on Go 1.26.8, [1.2,1.1,1.0] on 1.26.0). The real
+          # macOS client omits it entirely, so we skip it on macOS where uTLS's
+          # behavior is Go-version-dependent.
+          if runner_os != 'macOS':
+              keys.append("supported_versions")
           ok = True
           for k in keys:
               rv, pv = real.get(k), proj.get(k)
