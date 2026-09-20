@@ -20,7 +20,7 @@ concurrency:
 env:
   SOURCE_REPO: davidzhang12138/CLIProxyAPIPlus
   RELEASE_TAG: ${{ inputs.tag }}
-  GO_VERSION: '1.26.4'
+  GO_VERSION: '1.27.1'
 
 jobs:
   prepare-release:
